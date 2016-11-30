@@ -1,0 +1,74 @@
+################################# FIND THE DATA FILES ############################################ 
+filedirectory <- "/Volumes/My Passport for Mac/WD passport/Columbia-Ghana Project/MicroPem Raw Data/Nephelometer_processed_correct"
+Datafiles = list.files(filedirectory,full.names = TRUE)    #grab all MicroPEM files
+
+excludelist <-c("KHC0234")  # files with no nephelometer reading
+excludefiles <-Datafiles[unlist(sapply(excludelist, function(x) grep(x, Datafiles)))]
+Datafiles <- Datafiles[!(Datafiles %in% excludefiles)]            # removes empty files with no nephelometer reading
+MicroPEMfiles <- as.data.frame(Datafiles)                         # create a dataframe of datafiles
+
+###################################CHECK MICROPEM SETTINGS################################
+QualityControl = NULL                           #get MicroPEM settings and sampling information
+
+for(k in 1:nrow(MicroPEMfiles)){ 
+  Data1 = convertOutput(as.character(MicroPEMfiles$Datafiles[k]))
+  Data2 = Data1$measures
+  Data3 = Data2[!is.na(Data2$nephelometer),]
+  Data3$timeDate1 = as.POSIXlt(c(Data3$timeDate[-1], (Data3$timeDate[length(Data3$timeDate)]+1)), tz="GMT")
+  Data3$timediff = Data3$timeDate1 - Data3$timeDate
+  Data4 = as.data.frame(Data1$control, stringsAsFactors=FALSE)
+  Data4$starttime = Data3$timeDate[1]
+  Data4$endtime = Data3$timeDate[nrow(Data3)]
+  Data4$mintime = sort(Data3$timeDate, decreasing =F, na.rm=T)[1]
+  Data4$maxtime = sort(Data3$timeDate, decreasing =T, na.rm=T)[1]
+  Data4$mean = mean(Data3$nephelometer)
+  Data4$min = min(Data3$nephelometer)
+  Data4$max = max(Data3$nephelometer)
+  Data5 = Data2[Data2$timeDate>=Data4$starttime & Data2$timeDate<=(Data4$endtime-200),]
+  Data4$startbutton = ifelse(nrow(Data5)==0, NA, sum(sapply(Data5$shutDownReason, match,"Start button", nomatch=0)))
+  Data4$button1 = ifelse(nrow(Data5)==0, NA, sum(sapply(Data5$shutDownReason, match,"Button 1 pressed", nomatch=0)))
+  Data4$button2 = ifelse(nrow(Data5)==0, NA, sum(sapply(Data5$shutDownReason, match,"Button 2 pressed", nomatch=0)))
+  Data4$lowbattery = sum(sapply(Data2$shutDownReason, match,"Low Battery Stop", nomatch=0))
+  Data4$deadbattery = sum(sapply(Data2$shutDownReason, match,"Battery dead", nomatch=0))
+  Data4$timeerror = length(which(Data3$timediff<0))
+  QualityControl = rbind(QualityControl, Data4)
+  
+  if(round(k/50)*50==k)               
+    print(k)   
+}
+
+QualityControl$filterID = as.character(QualityControl$filterID)
+QualityControl$filterID[QualityControl$filterID== "KH00123"] = "KHC0123"              #correct Filterid typo
+QualityControl$filterID[QualityControl$filterID== "KHC3392"] = "KHC0392" 
+QualityControl$filterID[QualityControl$filterID== "LHC0232"] = "KHC0232"
+unique(sort(QualityControl$filterID))       #check unique filterID
+
+QualityControl$deviceSerial = as.character(QualityControl$deviceSerial)                                  
+QualityControl$deviceSerial[QualityControl$deviceSerial=="UGF32/2012"] = "UGF320415N"  #correct MicroPEMid typo
+QualityControl$deviceSerial[QualityControl$deviceSerial=="UGF320"]="UGF320429N"       
+QualityControl$deviceSerial[QualityControl$deviceSerial=="UGF320429"]="UGF320429N"
+QualityControl$deviceSerial[QualityControl$deviceSerial=="UFF320401N"]="UGF320401N"
+QualityControl$deviceSerial[QualityControl$deviceSerial=="UGF220414N"]="UGF320414N"
+QualityControl$deviceSerial[QualityControl$deviceSerial=="UGF220486N"]="UGF320486N"
+QualityControl$deviceSerial[QualityControl$deviceSerial=="UGF300422N"]="UGF320422N"
+QualityControl$deviceSerial[QualityControl$deviceSerial=="UGF300444N"]="UGF320444N"
+QualityControl$deviceSerial[QualityControl$deviceSerial=="UGF300599N"]="UGF320599N"
+QualityControl$deviceSerial[QualityControl$deviceSerial=="UG3320463N"]="UGF320463N"
+unique(sort(QualityControl$deviceSerial)) 
+
+QualityControl$participantID = as.character(QualityControl$participantID)
+saveRDS(QualityControl, file = "/Volumes/My Passport for Mac/WD passport/Columbia-Ghana Project/MicroPEM_Data/QualityControl.rds")  #save MicroPEM settings table
+
+#############################READ-IN MICROPEM SETTINGS TABLE#####################################
+QualityControl = readRDS("/Volumes/My Passport for Mac/WD passport/Columbia-Ghana Project/MicroPEM_Data/QualityControl.rds")
+table(QualityControl$nephelometerSlope)
+table(QualityControl$temperatureSlope)
+table(QualityControl$humiditySlope)
+table(QualityControl$humidityOffset)
+
+# drop duplicated files which have wrong MicroPEM settings (those files have been reprocessed via MicroPEM Docking Station)
+QualityControl = QualityControl[as.numeric(QualityControl$nephelometerSlope)>=3,]           #  correct nephelometerSlope is 3     
+QualityControl = QualityControl[as.numeric(QualityControl$humiditySlope)<=1 & as.numeric(QualityControl$humiditySlope)>0,]   # correct humiditySlope is 1
+QualityControl = QualityControl[as.numeric(QualityControl$humidityOffset)>-8 & as.numeric(QualityControl$humidityOffset)<10,]  # correct humidityOffset is between -5 and 5
+
+which(duplicated(QualityControl$filterID))    # check whether there are duplicate filter ID
